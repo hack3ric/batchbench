@@ -13,14 +13,14 @@
 #include "try.h"
 
 int main(int argc, char** argv) {
-  if (argc < 4) {
+  if (argc < 3) {
     fprintf(stderr, "not enough arguments\n");
     return 1;
   }
   int batch_size = strtol(argv[1], NULL, 0);
-  int chunk_size = strtol(argv[2], NULL, 0);
-  int signal_batched = strtol(argv[3], NULL, 0);
-  printf("batch size = %d, chunk size = %d, signal_batched = %d\n", batch_size, chunk_size, signal_batched);
+  // int chunk_size = strtol(argv[2], NULL, 0);
+  int signal_batched = strtol(argv[2], NULL, 0);
+  printf("batch size = %d, signal_batched = %d\n", batch_size, signal_batched);
 
   const char* ip = "192.168.122.1";
   struct sockaddr_in addr = {
@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
   struct rdma_client* rdma =
     try_p(rdma_client_connect((struct sockaddr*)&addr, batch_size), "failed to connect to RDMA server");
 
-  int buf_size = chunk_size * batch_size;
+  int buf_size = 4096;
   int work_count = 102400;
 
   void* local_buf = malloc(buf_size);
@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
 
   double avg = 0;
 
-  for (int i = 0; i < work_count / batch_size; i++) {
+  for (int i = 0; i < work_count; i++) {
     struct timespec tp1, tp2;
     struct ibv_sge sg[batch_size];
     struct ibv_send_wr wr[batch_size];
@@ -52,8 +52,8 @@ int main(int argc, char** argv) {
     // struct ibv_send_wr* wr = calloc(batch_size, sizeof(*wr));
     for (int j = 0; j < batch_size; j++) {
       sg[j] = (typeof(sg[j])){
-        .addr = (uintptr_t)local_buf + j * chunk_size,
-        .length = chunk_size,
+        .addr = (uintptr_t)local_buf + j * (buf_size / batch_size),
+        .length = (buf_size / batch_size),
         .lkey = local_mem->lkey,
       };
       wr[j] = (typeof(wr[j])){
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
   struct ibv_wc wc[1];
   while ((try3(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue")) != 0) printf("!\n");
   FILE* file = fopen("result.csv", "a");
-  fprintf(file, "%d,%d,%d,%lf\n", batch_size, chunk_size, signal_batched, avg);
+  fprintf(file, "%d,%d,%lf\n", batch_size, signal_batched, avg);
 
   return 0;
 
