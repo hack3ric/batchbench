@@ -15,7 +15,7 @@ struct rdma_conn {
 };
 
 // Create RDMA connection from connection manager.
-struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event);
+struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event, int batch_size);
 
 // Frees the RDMA connection.
 void rdma_conn_free(struct rdma_conn* conn);

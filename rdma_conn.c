@@ -6,18 +6,20 @@
 #include "rdma_conn.h"
 #include "try.h"
 
-struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event) {
+struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event, int batch_size) {
   struct rdma_conn* c = calloc(1, sizeof(*c));
   c->id = id;
   c->pd = try3_p(ibv_alloc_pd(c->id->verbs), "cannot allocate protection domain");
 
-  c->send_cq = try3_p(ibv_create_cq(id->verbs, 100, NULL, NULL, 0), "cannot create completion queue");
+  int cq_size = batch_size + 10;
+
+  c->send_cq = try3_p(ibv_create_cq(id->verbs, cq_size, NULL, NULL, 0), "cannot create completion queue");
   if (use_event) {
     c->cc = try3_p(ibv_create_comp_channel(id->verbs), "cannot create completion channel");
-    c->recv_cq = try3_p(ibv_create_cq(id->verbs, 100, NULL, c->cc, 0), "cannot create completion queue");
+    c->recv_cq = try3_p(ibv_create_cq(id->verbs, cq_size, NULL, c->cc, 0), "cannot create completion queue");
     try3(ibv_req_notify_cq(c->recv_cq, false), "cannot arm completion channel");
   } else {
-    c->recv_cq = try3_p(ibv_create_cq(id->verbs, 100, NULL, NULL, 0), "cannot create completion queue");
+    c->recv_cq = try3_p(ibv_create_cq(id->verbs, cq_size, NULL, NULL, 0), "cannot create completion queue");
   }
 
   // Create queue pair inside CM ID
@@ -25,7 +27,7 @@ struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event) {
     .qp_type = IBV_QPT_RC,
     .send_cq = c->send_cq,
     .recv_cq = c->recv_cq,
-    .cap = {.max_send_wr = 100, .max_recv_wr = 4, .max_send_sge = 1, .max_recv_sge = 1},
+    .cap = {.max_send_wr = cq_size, .max_recv_wr = 4, .max_send_sge = 1, .max_recv_sge = 1},
   };
   try3(rdma_create_qp(id, c->pd, &attr), "cannot create queue pair");
 
@@ -59,7 +61,7 @@ static inline int _expect_event(struct rdma_event_channel* events, enum rdma_cm_
     rdma_ack_cm_event(ev);
     return -1;
   }
-  fprintf(stderr, "ayy!! %s\n", rdma_event_str(type));
+  // fprintf(stderr, "ayy!! %s\n", rdma_event_str(type));
   if (conn_id) *conn_id = ev->id;
   if (param) *param = ev->param.conn;
   rdma_ack_cm_event(ev);

@@ -9,13 +9,7 @@
 
 #define RESOLVE_TIMEOUT_MS 500
 
-void rdma_client_free(struct rdma_client* client) {
-  if (client->conn) rdma_conn_free(client->conn);
-  if (client->rdma_events) rdma_destroy_event_channel(client->rdma_events);
-  free(client);
-}
-
-struct rdma_client* rdma_client_connect(struct sockaddr* addr) {
+struct rdma_client* rdma_client_connect(struct sockaddr* addr, int batch_size) {
   struct rdma_client* client = try2_p(calloc(1, sizeof(*client)));
   struct rdma_cm_id *id = NULL, *id2;
 
@@ -31,7 +25,7 @@ struct rdma_client* rdma_client_connect(struct sockaddr* addr) {
   // prevent double-free using macros
   id2 = id;
   id = NULL;
-  client->conn = try3_p(rdma_conn_create(id2, false), "failed to create RDMA connection");
+  client->conn = try3_p(rdma_conn_create(id2, false, batch_size), "failed to create RDMA connection");
 
   struct rdma_conn_param memory_param = {};
   try3(rdma_connect(client->conn->id, NULL), "failed to connect");
@@ -51,4 +45,10 @@ error:
   if (id) rdma_destroy_id(id);
   rdma_client_free(client);
   return NULL;
+}
+
+void rdma_client_free(struct rdma_client* client) {
+  if (client->conn) rdma_conn_free(client->conn);
+  if (client->rdma_events) rdma_destroy_event_channel(client->rdma_events);
+  free(client);
 }
