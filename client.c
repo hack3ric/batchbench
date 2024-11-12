@@ -40,17 +40,15 @@ void* thread_entry(void* args) {
     wr[i] = (typeof(wr[i])){
       .sg_list = &sg[i],
       .num_sge = 1,
-      // .send_flags = IBV_SEND_SIGNALED,
+      .send_flags = IBV_SEND_SIGNALED,
       .wr.rdma = {.remote_addr = p->c->mem.addr + (rand() % (1 << 29)), .rkey = p->c->mem.rkey},
     };
   }
   for (int i = 1; i < p->addrs_count; i++) {
     wr[i - 1].next = &wr[i];
-    // printf("%d\n", i);
   }
-  wr[p->addrs_count - 1].send_flags = IBV_SEND_SIGNALED;
+  // wr[p->addrs_count - 1].send_flags = IBV_SEND_SIGNALED;
 
-  // TODO: clock here
   struct ibv_send_wr* bad;
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
   try2(ibv_post_send(p->c->conn->id->qp, wr, &bad), "failed to post send");
@@ -63,7 +61,6 @@ void* thread_entry(void* args) {
   struct ibv_wc wc[wc_cnt];
   int cnt = 0;
   while ((cnt += try2(ibv_poll_cq(p->c->conn->send_cq, wc_cnt - cnt, wc + cnt), "failed to poll cq")) < wc_cnt);
-  // TODO: clock here
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t2);
 
   for (int i = 0; i < wc_cnt; i++) {
@@ -75,7 +72,6 @@ void* thread_entry(void* args) {
 
   double* delta = calloc(1, sizeof(double));
   *delta = (double)(t2.tv_sec - t1.tv_sec) * 1.0e9 + (double)(t2.tv_nsec - t1.tv_nsec);
-  *delta /= p->addrs_count;
   return delta;
 }
 
@@ -113,13 +109,11 @@ int main(int argc, char** argv) {
 
   int a = seg_count / thread_count;
   for (int i = 0; i < work_count; i++) {
-    // struct timespec tp1, tp2;
-
     pthread_t threads[thread_count];
     struct thread_params params[thread_count];
 
     for (int n = 0; n < thread_count; n++) {
-      int b = (n + 1) * seg_size > (buf_size % seg_count) ? 0 : 1;
+      int b = (n + 1) > (seg_count % thread_count) ? 0 : 1;
       int total_work_count = a + b;
       // printf("twc = %d\n", total_work_count);
       uint64_t* addrs = calloc(total_work_count, sizeof(uint64_t));
@@ -135,19 +129,16 @@ int main(int argc, char** argv) {
         .c = rdma,
       };
     }
-    // clock_gettime(CLOCK_MONOTONIC, &tp1);
     for (int n = 0; n < thread_count; n++) {
       try3(pthread_create(&threads[n], NULL, thread_entry, &params[n]), "failed to spawn thread");
     }
     for (int n = 0; n < thread_count; n++) {
       double* delta;
       pthread_join(threads[n], (void**)&delta);
-      // printf("delta=%lf\n", *delta);
-      avg += *delta / thread_count;
+      if (!delta) continue;
+      // printf("delta = %lf\n", *delta);
+      avg += *delta;
     }
-    // clock_gettime(CLOCK_MONOTONIC, &tp2);
-    // double delta = (double)(tp2.tv_sec - tp1.tv_sec) * 1.0e9 + (double)(tp2.tv_nsec - tp1.tv_nsec);
-    // avg += delta;
   }
 
   avg /= work_count;
