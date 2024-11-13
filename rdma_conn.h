@@ -25,10 +25,20 @@ int expect_connect_request(struct rdma_event_channel* events, struct rdma_cm_id*
                            struct rdma_conn_param* param);
 int expect_established(struct rdma_event_channel* events, struct rdma_conn_param* param);
 
+int rdma_conn_poll_ev(struct rdma_conn* conn, struct ibv_wc* wcs, size_t wcn);
+
 struct memory_info {
   uintptr_t addr;
   size_t size;
   uint32_t rkey;
+};
+
+struct message {
+  struct {
+    uint64_t addr;
+    size_t len;
+  } segs[16];
+  size_t count;
 };
 
 #endif  // RDMA_CONN_H

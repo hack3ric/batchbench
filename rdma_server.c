@@ -1,5 +1,6 @@
 #include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
+#include <rdma/rdma_verbs.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -7,14 +8,6 @@
 #include "rdma_server.h"
 #include "try.h"
 
-void rdma_server_free(struct rdma_server* s) {
-  if (s->mr) ibv_dereg_mr(s->mr);
-  if (s->listen_id) rdma_destroy_id(s->listen_id);
-  if (s->events) rdma_destroy_event_channel(s->events);
-  if (s->conn) rdma_conn_free(s->conn);
-}
-
-// TODO: pass MR information to compute side
 struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t mem_size) {
   struct rdma_server* s = try2_p(calloc(1, sizeof(*s)));
   s->events = try3_p(rdma_create_event_channel(), "failed to create RDMA event channel");
@@ -29,7 +22,7 @@ struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t 
   struct rdma_cm_id* conn_id = NULL;
   struct rdma_conn_param param = {};
   try3(expect_connect_request(s->events, &conn_id, &param), "failed");
-  s->conn = try3_p(rdma_conn_create(conn_id, true, 10), "failed to create connection");
+  s->conn = try3_p(rdma_conn_create(conn_id, false, 128), "failed to create connection");
 
   const unsigned int MR_FLAGS = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
   s->mr = try3_p(ibv_reg_mr(s->conn->pd, mem, mem_size, MR_FLAGS), "cannot register memory region");
@@ -47,9 +40,26 @@ struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t 
   try3(rdma_accept(s->conn->id, &param), "failed to accept");
   try3(expect_established(s->events, NULL));
 
+  s->recv_buf = calloc(1, sizeof(struct message));
+  s->recv_mr = try3_p(ibv_reg_mr(s->conn->pd, s->recv_buf, sizeof(struct message), MR_FLAGS));
+
+  // pre-post recv
+  for (int i = 0; i < 128; i++) {
+    try3(rdma_post_recv(s->conn->id, NULL, s->recv_buf, sizeof(struct message), s->recv_mr), "failed to RDMA recv");
+  }
+
   return s;
 
 error:
   rdma_server_free(s);
   return NULL;
+}
+
+void rdma_server_free(struct rdma_server* s) {
+  if (s->recv_mr) ibv_dereg_mr(s->recv_mr);
+  if (s->recv_buf) free(s->recv_buf);
+  if (s->mr) ibv_dereg_mr(s->mr);
+  if (s->listen_id) rdma_destroy_id(s->listen_id);
+  if (s->events) rdma_destroy_event_channel(s->events);
+  if (s->conn) rdma_conn_free(s->conn);
 }

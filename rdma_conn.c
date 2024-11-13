@@ -27,7 +27,7 @@ struct rdma_conn* rdma_conn_create(struct rdma_cm_id* id, bool use_event, int ba
     .qp_type = IBV_QPT_RC,
     .send_cq = c->send_cq,
     .recv_cq = c->recv_cq,
-    .cap = {.max_send_wr = cq_size, .max_recv_wr = 4, .max_send_sge = 1, .max_recv_sge = 1},
+    .cap = {.max_send_wr = cq_size, .max_recv_wr = cq_size, .max_send_sge = 16, .max_recv_sge = 16},
   };
   try3(rdma_create_qp(id, c->pd, &attr), "cannot create queue pair");
 
@@ -79,4 +79,31 @@ int expect_connect_request(struct rdma_event_channel* events, struct rdma_cm_id*
 
 int expect_established(struct rdma_event_channel* events, struct rdma_conn_param* param) {
   return _expect_event(events, RDMA_CM_EVENT_ESTABLISHED, NULL, param);
+}
+
+// Poll as many work completions as available in one event.
+int rdma_conn_poll_ev(struct rdma_conn* conn, struct ibv_wc* wcs, size_t wcn) {
+  struct ibv_cq* cq_ptr;
+  void* cq_ctx_ptr;
+  try(ibv_get_cq_event(conn->cc, &cq_ptr, &cq_ctx_ptr), "failed to get completion event");
+  // assert(cq_ptr == conn->recv_cq);
+
+  int polled = 0;
+  do {
+    int count =
+      try(ibv_poll_cq(cq_ptr, wcn - polled, wcs + polled), "failed to poll completion queue");
+      printf("count = %d\n", count);
+    if (count == 0) {
+      if (polled == 0) {
+        fprintf(stderr, "completion channel reports false positive\n");
+        return -(errno = EBADMSG);
+      }
+      break;
+    }
+    polled += count;
+  } while (polled < wcn);
+
+  ibv_ack_cq_events(cq_ptr, 1);  // potential optimization by batching ACKs
+  try(ibv_req_notify_cq(cq_ptr, false), "cannot rearm completion channel");
+  return polled;
 }

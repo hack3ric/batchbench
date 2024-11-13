@@ -11,6 +11,9 @@ struct rdma_server {
   struct rdma_cm_id* listen_id;
   struct rdma_conn* conn;
   struct ibv_mr* mr;
+
+  struct message* recv_buf;
+  struct ibv_mr* recv_mr;
 };
 
 struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t mem_size);
