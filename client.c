@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <bits/time.h>
 #include <infiniband/verbs.h>
+#include <pthread.h>
 #include <rdma/rdma_verbs.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,6 +13,16 @@
 #include "rdma_client.h"
 #include "try.h"
 
+void* poll(void* args) {
+  struct rdma_client* rdma = args;
+  struct ibv_wc wc[1];
+  int ret = 0;
+  while ((ret = try2(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue"))) {
+    if (ret != 0) printf("ret = %d\n", ret);
+  };
+  return NULL;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     fprintf(stderr, "not enough arguments\n");
@@ -20,7 +31,7 @@ int main(int argc, char** argv) {
   int segment_count = strtol(argv[1], NULL, 0);
   // int chunk_size = strtol(argv[2], NULL, 0);
   // int signal_batched = strtol(argv[2], NULL, 0);
-  int signal_batched = 1;
+  int signal_batched = 0;
   printf("segment count = %d, signal_batched = %d\n", segment_count, signal_batched);
 
   const char* ip = "192.168.122.1";
@@ -36,7 +47,7 @@ int main(int argc, char** argv) {
   int mem_size = buf_size * work_count;
 
   struct rdma_client* rdma =
-    try_p(rdma_client_connect((struct sockaddr*)&addr, work_count * segment_count), "failed to connect to RDMA server");
+    try_p(rdma_client_connect((struct sockaddr*)&addr, 10240), "failed to connect to RDMA server");
 
   void* local_buf = malloc(mem_size);
   struct ibv_mr* local_mem =
@@ -46,8 +57,14 @@ int main(int argc, char** argv) {
 
   double total = 0;
 
-  for (int i = 0; i < work_count; i++) {
+  // pthread_t poll_thread;
+  // pthread_create(&poll_thread, NULL, poll, rdma);
+
   struct timespec tp1, tp2;
+
+  try3(clock_gettime(CLOCK_REALTIME, &tp1), "failed to get 1st time");
+
+  for (int i = 0; i < work_count; i++) {
     struct ibv_sge sg[segment_count];
     struct ibv_send_wr wr[segment_count];
     // struct ibv_sge* sg = try3_p(calloc(batch_size, sizeof(*sg)), "nooo!");
@@ -70,17 +87,12 @@ int main(int argc, char** argv) {
 
     // printf("i = %d\n", i);
 
-  try3(clock_gettime(CLOCK_REALTIME, &tp1), "failed to get 1st time");
     struct ibv_send_wr* bad;
     try3(ibv_post_send(rdma->conn->id->qp, &wr[0], &bad), "failed to post send");
     if (bad) {
       fprintf(stderr, "bad wr pointer non null\n");
       return 1;
     }
-      try3(clock_gettime(CLOCK_REALTIME, &tp2), "failed to get 2nd time");
-
-
-    total += (double)(tp2.tv_sec - tp1.tv_sec) * 1.0e9 + (double)(tp2.tv_nsec - tp1.tv_nsec);
 
     // int wc_cnt = signal_batched ? 1 : batch_size;
     // struct ibv_wc wc[wc_cnt];
@@ -103,10 +115,15 @@ int main(int argc, char** argv) {
     // avg += delta;
   }
 
+  try3(clock_gettime(CLOCK_REALTIME, &tp2), "failed to get 2nd time");
+
+  total = (double)(tp2.tv_sec - tp1.tv_sec) * 1.0e9 + (double)(tp2.tv_nsec - tp1.tv_nsec);
+
   // avg /= work_count;
   printf("total = %lf, post_send throughput = %lf calls/sec\n", total, work_count / (total / 1.0e9));
-  struct ibv_wc wc[1];
-  while ((try3(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue")) == 0);
+  // struct ibv_wc wc[1];
+  // while ((try3(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue")) == 0);
+  // pthread_cancel(poll_thread);
   FILE* file = fopen("result.csv", "a");
   fprintf(file, "%d,%d,%lf\n", segment_count, signal_batched, total);
 
