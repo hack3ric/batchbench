@@ -31,6 +31,8 @@ void* thread_entry(void* args) {
 
   struct timespec t1, t2;
 
+  // printf("using rdma client %p\n", p->c->conn->id->context);
+
   for (int i = 0; i < p->addrs_count; i++) {
     sg[i] = (typeof(sg[i])){
       .addr = p->addrs[i],
@@ -56,12 +58,12 @@ void* thread_entry(void* args) {
     fprintf(stderr, "bad wr pointer non null\n");
     return NULL;
   }
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t2);
 
   int wc_cnt = p->addrs_count;
   struct ibv_wc wc[wc_cnt];
   int cnt = 0;
   while ((cnt += try2(ibv_poll_cq(p->c->conn->send_cq, wc_cnt - cnt, wc + cnt), "failed to poll cq")) < wc_cnt);
-  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t2);
 
   for (int i = 0; i < wc_cnt; i++) {
     if (wc[i].status != IBV_WC_SUCCESS) {
@@ -72,6 +74,7 @@ void* thread_entry(void* args) {
 
   double* delta = calloc(1, sizeof(double));
   *delta = (double)(t2.tv_sec - t1.tv_sec) * 1.0e9 + (double)(t2.tv_nsec - t1.tv_nsec);
+  // printf("delta = %lf\n", *delta);
   return delta;
 }
 
@@ -92,20 +95,35 @@ int main(int argc, char** argv) {
   };
   inet_pton(AF_INET, ip, &addr.sin_addr);
 
-  struct rdma_client* rdma =
-    try_p(rdma_client_connect((struct sockaddr*)&addr, seg_count), "failed to connect to RDMA server");
-
   int buf_size = 4096;
   int seg_size = buf_size / seg_count;
-  int work_count = 10240;
-
-  void* local_buf = malloc(buf_size);
-  struct ibv_mr* local_mem =
-    try3_p(ibv_reg_mr(rdma->conn->pd, local_buf, buf_size,
-                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE),
-           "failed to register memory region");
+  int work_count = 102400;
 
   double avg = 0;
+
+  // TODO: multiple clients and mr for each thread
+
+  // void* buf = malloc(buf_size);
+  struct rdma_client* clients[thread_count];
+  void* bufs[thread_count];
+  struct ibv_mr* mrs[thread_count];
+  for (int i = 0; i < thread_count; i++) {
+    clients[i] = try_p(rdma_client_connect((struct sockaddr*)&addr, seg_count), "failed to connect to RDMA server");
+    bufs[i] = malloc(buf_size);
+    mrs[i] = try_p(ibv_reg_mr(clients[i]->conn->pd, bufs[i], buf_size,
+                              IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE),
+                   "failed to register memory region");
+    // printf("i = %d\n", i);
+  }
+
+  // struct rdma_client* rdma =
+  //   try_p(rdma_client_connect((struct sockaddr*)&addr, seg_count), "failed to connect to RDMA server");
+
+  // void* local_buf = malloc(buf_size);
+  // struct ibv_mr* local_mem =
+  //   try3_p(ibv_reg_mr(rdma->conn->pd, local_buf, buf_size,
+  //                     IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE),
+  //          "failed to register memory region");
 
   int a = seg_count / thread_count;
   for (int i = 0; i < work_count; i++) {
@@ -118,15 +136,15 @@ int main(int argc, char** argv) {
       // printf("twc = %d\n", total_work_count);
       uint64_t* addrs = calloc(total_work_count, sizeof(uint64_t));
       for (int j = 0; j < total_work_count; j++) {
-        addrs[j] = (uintptr_t)local_buf + n * seg_size + j * thread_count * seg_size;
+        addrs[j] = (uintptr_t)bufs[n] + n * seg_size + j * thread_count * seg_size;
         // printf("addrs[%d] = %lu\n", j, addrs[j]);
       }
       params[n] = (typeof(params[n])){
         .addrs = addrs,
         .addrs_count = total_work_count,
-        .lkey = local_mem->lkey,
+        .lkey = mrs[n]->lkey,
         .seg_size = seg_size,
-        .c = rdma,
+        .c = clients[n],
       };
     }
     for (int n = 0; n < thread_count; n++) {
@@ -143,14 +161,14 @@ int main(int argc, char** argv) {
 
   avg /= work_count;
   printf("avg = %lf\n", avg);
-  struct ibv_wc wc[1];
-  while ((try3(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue")) != 0) printf("!\n");
+  // struct ibv_wc wc[1];
+  // while ((try3(ibv_poll_cq(rdma->conn->send_cq, 1, wc), "failed to poll completion queue")) != 0) printf("!\n");
   FILE* file = fopen("result.csv", "a");
   fprintf(file, "%d,%d,%lf\n", seg_count, thread_count, avg);
 
   return 0;
 
 error:
-  rdma_client_free(rdma);
+  // rdma_client_free(rdma);
   return -errno;
 }

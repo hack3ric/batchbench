@@ -83,8 +83,8 @@ int rdma_server_handle(struct rdma_server* s) {
       s->conn_remaining--;
       if (s->conn_remaining == 0) {
         fprintf(stderr, "no conn remaining, cleaning\n");
-        // Somehow server is stuck below, so we leak memory anyway
-        // for (int i = 0; i < s->conn_count; i++) rdma_conn_free(s->conns[i]);
+        rdma_ack_cm_event(ev);
+        for (int i = 0; i < s->conn_count; i++) rdma_conn_free(s->conns[i]);
         free(s->conns);
         for (int i = 0; i < s->conn_count; i++) ibv_dereg_mr(s->mrs[i]);
         free(s->mrs);
@@ -92,6 +92,7 @@ int rdma_server_handle(struct rdma_server* s) {
         s->conns = NULL;
         s->conn_count = 0;
         fprintf(stderr, "done\n");
+        return 0;
       }
       break;
     default:

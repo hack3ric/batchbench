@@ -13,8 +13,12 @@ struct rdma_client* rdma_client_connect(struct sockaddr* addr, int batch_size) {
   struct rdma_client* client = try2_p(calloc(1, sizeof(*client)));
   struct rdma_cm_id *id = NULL, *id2;
 
+  struct ibv_device** devs = ibv_get_device_list(NULL);
+  struct ibv_context* ctx = ibv_open_device(devs[0]);
+  ibv_free_device_list(devs);
+
   client->rdma_events = try3_p(rdma_create_event_channel(), "failed to create RDMA event channel");
-  try3(rdma_create_id(client->rdma_events, &id, NULL, RDMA_PS_TCP), "failed to create RDMA ID");
+  try3(rdma_create_id(client->rdma_events, &id, ctx, RDMA_PS_TCP), "failed to create RDMA ID");
 
   // Resolve remote address and route
   try3(rdma_resolve_addr(id, NULL, addr, RESOLVE_TIMEOUT_MS), "failed to resolve address");

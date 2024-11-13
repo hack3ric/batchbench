@@ -3,3 +3,4 @@ server
 client
 *.o
 compile_commands.json
+result*.csv
