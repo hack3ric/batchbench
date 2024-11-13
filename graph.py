@@ -17,7 +17,7 @@ import matplotlib
 
 data = {}
 
-with open("result.csv") as file:
+with open("result-3-post-send.csv") as file:
     reader = csv.reader(file)
     for row in reader:
         batch_size = int(row[0])
@@ -33,7 +33,7 @@ with open("result.csv") as file:
 fig, p = plt.subplots()
 
 p.set_xlabel("Segment count")
-p.set_xscale("log", base=2)
+# p.set_xscale("log", base=2)
 p.get_xaxis().set_major_formatter(ScalarFormatter())
 p.get_xaxis().set_minor_formatter(ScalarFormatter())
 # p.get_xaxis().set_minor_locator(LogLocator(base=4, subs=[0.5]))
