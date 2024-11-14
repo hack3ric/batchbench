@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
   int signal_batched = strtol(argv[2], NULL, 0);
   printf("batch size = %d, signal_batched = %d\n", seg_count, signal_batched);
 
-  const char* ip = "172.23.45.67";
+  const char* ip = "192.168.122.1";
   struct sockaddr_in addr = {
     .sin_family = AF_INET,
     .sin_port = htons(22222),
@@ -34,10 +34,10 @@ int main(int argc, char** argv) {
   inet_pton(AF_INET, ip, &addr.sin_addr);
 
   struct rdma_client* rdma =
-    try_p(rdma_client_connect((struct sockaddr*)&addr, 128), "failed to connect to RDMA server");
+    try_p(rdma_client_connect((struct sockaddr*)&addr, 64), "failed to connect to RDMA server");
 
   int buf_size = 4096;
-  int work_count = 12800;
+  int work_count = 128000;
   double avg = 0;
 
   void* local_buf = malloc(buf_size);
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
            "failed to register memory region");
 
   // pre-post recv
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < 64; i++) {
     try3(rdma_post_recv(rdma->conn->id, NULL, local_buf, buf_size, local_mr), "failed to RDMA recv");
   }
 

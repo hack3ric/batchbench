@@ -22,7 +22,7 @@ struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t 
   struct rdma_cm_id* conn_id = NULL;
   struct rdma_conn_param param = {};
   try3(expect_connect_request(s->events, &conn_id, &param), "failed");
-  s->conn = try3_p(rdma_conn_create(conn_id, false, 128), "failed to create connection");
+  s->conn = try3_p(rdma_conn_create(conn_id, false, 64), "failed to create connection");
 
   const unsigned int MR_FLAGS = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
   s->mr = try3_p(ibv_reg_mr(s->conn->pd, mem, mem_size, MR_FLAGS), "cannot register memory region");
@@ -44,7 +44,7 @@ struct rdma_server* rdma_server_create(struct sockaddr* addr, void* mem, size_t 
   s->recv_mr = try3_p(ibv_reg_mr(s->conn->pd, s->recv_buf, sizeof(struct message), MR_FLAGS));
 
   // pre-post recv
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < 64; i++) {
     try3(rdma_post_recv(s->conn->id, NULL, s->recv_buf, sizeof(struct message), s->recv_mr), "failed to RDMA recv");
   }
 
